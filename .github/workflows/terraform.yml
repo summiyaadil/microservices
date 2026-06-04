@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        environment: [dev]
     defaults:
       run:
         working-directory: environments/${{ matrix.environment }}
@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        environment: [dev]
     defaults:
       run:
         working-directory: environments/${{ matrix.environment }}
@@ -133,7 +133,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        environment: [dev]
     defaults:
       run:
         working-directory: environments/${{ matrix.environment }}
