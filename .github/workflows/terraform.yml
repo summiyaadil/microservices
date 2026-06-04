@@ -1,4 +1,4 @@
-name: 'Infrastructure & Application'
+name: 'Terraform Infrastructure CI/CD'
 
 on:
   push:
@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  terraform:
-    name: 'Terraform'
+  build:
+    name: 'Build'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -21,41 +21,160 @@ jobs:
     defaults:
       run:
         working-directory: environments/${{ matrix.environment }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Azure Login
-      uses: azure/login@v2
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: "1.13.5"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.5"
 
-    - name: Terraform Init
-      run: terraform init
+      - name: Terraform Init
+        run: terraform init
 
-    - name: Terraform Plan
-      id: plan
-      run: terraform plan -no-color -input=false
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan -input=false
 
-    - name: Terraform Apply
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: terraform apply -auto-approve -input=false
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: environments/${{ matrix.environment }}/tfplan
 
-  deploy-app:
-    name: 'Build & Deploy App'
-    needs: terraform
+  scan:
+    name: 'Scan'
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
+    defaults:
+      run:
+        working-directory: environments/${{ matrix.environment }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog OSS
+        # Run only once to avoid redundancy
+        if: matrix.environment == 'dev'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.50.0
+
+      - name: TFLint Init
+        run: tflint --init --config ../../.tflint.hcl
+
+      - name: TFLint Run
+        run: tflint --config ../../.tflint.hcl
+
+      - name: TFSec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: environments/${{ matrix.environment }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: environments/${{ matrix.environment }}
+
+      # - name: Infracost Setup
+      #   uses: infracost/actions/setup@v3
+      #   with:
+      #     api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      # - name: Infracost Breakdown
+      #   run: infracost breakdown --path tfplan --format json --out-file infracost.json
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Terratest
+        run: |
+          cd ../../test
+          go test -v -timeout 30m
+
+  deploy:
+    name: 'Deploy'
+    needs: scan
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        environment: [dev] # Starting with dev for the app deployment
+        environment: [dev, prod]
+    defaults:
+      run:
+        working-directory: environments/${{ matrix.environment }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.5"
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: environments/${{ matrix.environment }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+  deploy-app:
+    name: 'Build & Deploy App'
+    needs: deploy
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -70,11 +189,8 @@ jobs:
     - name: Get ACR Name
       id: get_acr
       run: |
-        # Extract ACR name from terraform vars or state. 
-        # For simplicity, we use the known pattern: projectnameenvacr
-        # In a real scenario, you'd use terraform output.
-        PROJECT_NAME=$(grep "project_name" environments/${{ matrix.environment }}/terraform.tfvars | cut -d'=' -f2 | tr -d ' "' | xargs)
-        ENV_NAME=$(grep "env" environments/${{ matrix.environment }}/terraform.tfvars | cut -d'=' -f2 | tr -d ' "' | xargs)
+        PROJECT_NAME=$(grep "project_name" environments/dev/terraform.tfvars | cut -d'=' -f2 | tr -d ' "' | xargs)
+        ENV_NAME=$(grep "env" environments/dev/terraform.tfvars | cut -d'=' -f2 | tr -d ' "' | xargs)
         echo "acr_name=${PROJECT_NAME}${ENV_NAME}acr" >> $GITHUB_OUTPUT
         echo "resource_group=${PROJECT_NAME}-${ENV_NAME}-rg" >> $GITHUB_OUTPUT
         echo "aks_name=${PROJECT_NAME}-${ENV_NAME}-aks" >> $GITHUB_OUTPUT
