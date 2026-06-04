@@ -44,7 +44,9 @@ module "kubernetes_cluster" {
       dns_prefix          = "${var.project_name}-${var.env}-dns"
       node_count          = 3
       vm_size             = "Standard_DS3_v2"
-      acr_ids             = [module.container_registry.acr_ids["${var.project_name}${var.env}acr"]]
+      acr_ids             = {
+        "primary" = module.container_registry.acr_ids["${var.project_name}${var.env}acr"]
+      }
       tags = {
         Environment = var.env
         Project     = var.project_name

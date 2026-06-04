@@ -71,8 +71,9 @@ resource "azurerm_kubernetes_cluster_node_pool" "extra" {
 locals {
   role_assignments = flatten([
     for cluster_key, cluster in var.clusters : [
-      for acr_id in cluster.acr_ids : {
+      for acr_key, acr_id in cluster.acr_ids : {
         cluster_key = cluster_key
+        acr_key     = acr_key
         acr_id      = acr_id
       }
     ]
@@ -80,7 +81,7 @@ locals {
 }
 
 resource "azurerm_role_assignment" "aks_acr_pull" {
-  for_each = { for ra in local.role_assignments : "${ra.cluster_key}_${ra.acr_id}" => ra }
+  for_each = { for ra in local.role_assignments : "${ra.cluster_key}_${ra.acr_key}" => ra }
 
   principal_id                     = azurerm_kubernetes_cluster.aks[each.value.cluster_key].kubelet_identity[0].object_id
   role_definition_name             = "AcrPull"

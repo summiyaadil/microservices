@@ -12,6 +12,6 @@ variable "clusters" {
       node_count = number
       vm_size    = string
     })), {})
-    acr_ids = optional(list(string), [])
+    acr_ids = optional(map(string), {})
   }))
 }

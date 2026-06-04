@@ -34,7 +34,9 @@ module "kubernetes_cluster" {
       resource_group_name = module.resource_group.resource_group_names["${var.project_name}-${var.env}-rg"]
       dns_prefix          = "${var.project_name}-${var.env}-dns"
       node_count          = 1
-      acr_ids             = [module.container_registry.acr_ids["${var.project_name}${var.env}acr"]]
+      acr_ids             = {
+        "primary" = module.container_registry.acr_ids["${var.project_name}${var.env}acr"]
+      }
       tags = {
         Environment = var.env
         Project     = var.project_name
