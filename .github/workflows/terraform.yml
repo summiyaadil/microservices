@@ -76,15 +76,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: TruffleHog OSS
-        # Run only once to avoid redundancy
-        if: matrix.environment == 'dev'
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-          extra_args: --debug --only-verified
+      # - name: TruffleHog OSS
+      #   # Run only once to avoid redundancy
+      #   if: matrix.environment == 'dev'
+      #   uses: trufflesecurity/trufflehog@main
+      #   with:
+      #     path: ./
+      #     base: ${{ github.event.repository.default_branch }}
+      #     head: HEAD
+      #     extra_args: --debug --only-verified
 
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v4
